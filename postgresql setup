@@ -1,0 +1,144 @@
+Open psql shell:
+
+
+
+
+Server [localhost]:
+Just press Enter (default is localhost).
+
+Database [postgres]:
+If you want to log in to the default DB, press Enter.
+(Later we’ll create biblionova and log into that instead).
+
+Port [5432]:
+Just press Enter (that’s the default).
+
+Username [postgres]:
+Enter postgres (superuser).
+
+Password for user postgres:
+
+
+
+
+CREATE DATABASE biblionova;
+CREATE USER biblio_user WITH PASSWORD 'biblio_pass';
+GRANT ALL PRIVILEGES ON DATABASE biblionova TO biblio_user;
+\c biblionova
+
+
+
+
+
+-- USERS table
+CREATE TABLE users (
+    user_id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- BOOKS table
+CREATE TABLE books (
+    book_id SERIAL PRIMARY KEY,
+    title VARCHAR(200) NOT NULL,
+    author VARCHAR(150),
+    genre VARCHAR(50),
+    published_year INT,
+    series_id INT
+);
+
+-- REVIEWS table
+CREATE TABLE reviews (
+    review_id SERIAL PRIMARY KEY,
+    user_id INT REFERENCES users(user_id) ON DELETE CASCADE,
+    book_id INT REFERENCES books(book_id) ON DELETE CASCADE,
+    rating INT CHECK (rating BETWEEN 1 AND 5),
+    comment TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- SERIES table (for book series like Harry Potter, LOTR, etc.)
+CREATE TABLE series (
+    series_id SERIAL PRIMARY KEY,
+    series_name VARCHAR(200) NOT NULL,
+    description TEXT
+);
+
+-- link books to series properly
+ALTER TABLE books
+ADD CONSTRAINT fk_series FOREIGN KEY (series_id) REFERENCES series(series_id) ON DELETE SET NULL;
+
+-- add total_xp to users if not present
+ALTER TABLE users ADD COLUMN IF NOT EXISTS total_xp INT DEFAULT 0;
+
+-- create reading_logs table (associative)
+CREATE TABLE IF NOT EXISTS reading_logs (
+  id SERIAL PRIMARY KEY,
+  user_id INT REFERENCES users(user_id) ON DELETE CASCADE,
+  book_id INT REFERENCES books(book_id) ON DELETE CASCADE,
+  pages_read INT NOT NULL,
+  log_date DATE DEFAULT CURRENT_DATE
+);
+
+-- create badges + user_badges
+CREATE TABLE IF NOT EXISTS badges (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(100) NOT NULL,
+  description TEXT,
+  criteria_type VARCHAR(50),   -- 'pages', 'books', 'genre'
+  criteria_value VARCHAR(100)  -- numeric for pages/books, or genre name
+);
+
+CREATE TABLE IF NOT EXISTS user_badges (
+  id SERIAL PRIMARY KEY,
+  user_id INT REFERENCES users(user_id) ON DELETE CASCADE,
+  badge_id INT REFERENCES badges(id) ON DELETE CASCADE,
+  earned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, badge_id)
+);
+
+-- trigger function to refresh total_xp when reading_logs change
+CREATE OR REPLACE FUNCTION refresh_total_xp() RETURNS trigger AS $$
+DECLARE uid INT;
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    uid := OLD.user_id;
+  ELSE
+    uid := NEW.user_id;
+  END IF;
+
+  UPDATE users
+  SET total_xp = COALESCE((
+    SELECT SUM(pages_read) FROM reading_logs WHERE user_id = uid
+  ), 0)
+  WHERE user_id = uid;
+
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  ELSE
+    RETURN NEW;
+  END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+-- attach triggers
+DROP TRIGGER IF EXISTS trg_refresh_xp_insert ON reading_logs;
+CREATE TRIGGER trg_refresh_xp_insert AFTER INSERT ON reading_logs FOR EACH ROW EXECUTE FUNCTION refresh_total_xp();
+
+DROP TRIGGER IF EXISTS trg_refresh_xp_update ON reading_logs;
+CREATE TRIGGER trg_refresh_xp_update AFTER UPDATE ON reading_logs FOR EACH ROW EXECUTE FUNCTION refresh_total_xp();
+
+DROP TRIGGER IF EXISTS trg_refresh_xp_delete ON reading_logs;
+CREATE TRIGGER trg_refresh_xp_delete AFTER DELETE ON reading_logs FOR EACH ROW EXECUTE FUNCTION refresh_total_xp();
+
+-- sample basic badges (optional)
+INSERT INTO badges (name, description, criteria_type, criteria_value)
+VALUES
+('First Steps','Read your first book','books','1'),
+('Page Turner','Read 500 pages total','pages','500'),
+('Sci-Fi Explorer','Read 2 Sci-Fi books','genre','Sci-Fi')
+ON CONFLICT DO NOTHING;
+
+
