@@ -1,10 +1,1 @@
-# root .gitignore
-node_modules
 .env
-.DS_Store
-client/node_modules
-server/node_modules
-.vscode
-dist
-build
-server/env
