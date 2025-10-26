@@ -1,3 +1,6 @@
+# mysql -u root -p ---> to start mysql shell. then enter password
+
+-- -----------------------------------------------------DATABASE CREATION-----------------------------------------------------------------------------
 create database bookstore;
 use bookstore;
 show tables;
